@@ -1,0 +1,6 @@
+{
+  "name": "Raikart",
+  "description": "A modern, responsive full-stack e-commerce learning application.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,155 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        request.auth.token.email == 'rahimahisah17@gmail.com'
+      );
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+
+    // -- Connection Test --
+    match /test/{testId} {
+      allow read: if true;
+    }
+
+    // -- Admins --
+    function isValidAdmin(data) {
+      let validKeys = data.keys().hasOnly(['email', 'grantedAt']);
+      let hasRequired = data.keys().hasAll(['email', 'grantedAt']);
+      return validKeys && hasRequired && data.email is string;
+    }
+    match /admins/{adminId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() && isValidId(adminId) && isValidAdmin(incoming());
+      allow delete: if isAdmin();
+      allow update: if false;
+    }
+
+    // -- Categories --
+    function isValidCategory(data) {
+      let validKeys = data.keys().hasOnly(['name', 'createdAt', 'updatedAt']);
+      let hasRequired = data.keys().hasAll(['name', 'createdAt', 'updatedAt']);
+      return validKeys && hasRequired && data.name is string && data.name.size() > 0 && data.name.size() <= 100;
+    }
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow create: if isAdmin() && isValidId(categoryId) && isValidCategory(incoming()) && incoming().createdAt == request.time;
+      allow update: if isAdmin() && isValidId(categoryId) && isValidCategory(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isAdmin();
+    }
+
+    // -- Products --
+    function isValidProduct(data) {
+      let allowedKeys = ['name', 'category', 'price', 'description', 'image', 'colors', 'sizes', 'stock', 'createdAt', 'updatedAt'];
+      let validKeys = data.keys().hasOnly(allowedKeys);
+      let validStrings = (!('name' in data) || (data.name is string && data.name.size() <= 100)) &&
+                         (!('category' in data) || data.category is string) &&
+                         (!('description' in data) || data.description is string) &&
+                         (!('image' in data) || data.image is string);
+      let validNumbers = (!('price' in data) || (data.price is number && data.price >= 0)) &&
+                         (!('stock' in data) || (data.stock is number && data.stock >= 0));
+      let validArrays = (!('colors' in data) || data.colors is list) &&
+                        (!('sizes' in data) || data.sizes is list);
+      return validKeys && validStrings && validNumbers && validArrays;
+    }
+
+    function isFullValidProduct(data) {
+      let hasRequired = data.keys().hasAll(['name', 'category', 'price', 'description', 'image', 'colors', 'sizes', 'stock', 'createdAt', 'updatedAt']);
+      return hasRequired && isValidProduct(data);
+    }
+
+    match /products/{productId} {
+      allow read: if true;
+      allow create: if isAdmin() && isValidId(productId) && isFullValidProduct(incoming()) && incoming().createdAt == request.time;
+      allow update: if isAdmin() && isValidId(productId) && isValidProduct(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isAdmin();
+    }
+
+    // -- Users --
+    function isValidUser(data) {
+      let validKeys = data.keys().hasOnly(['name', 'email', 'wishlist', 'createdAt', 'updatedAt']);
+      let hasRequired = data.keys().hasAll(['name', 'email', 'createdAt', 'updatedAt']);
+      let validName = data.name is string && data.name.size() <= 100;
+      let validEmail = data.email is string && data.email.size() <= 150;
+      let validWishlist = !('wishlist' in data) || (data.wishlist is list && data.wishlist.size() <= 100);
+      return validKeys && hasRequired && validName && validEmail && validWishlist;
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isOwner(userId)
+                    && isValidId(userId)
+                    && isValidUser(incoming())
+                    && incoming().createdAt == request.time
+                    && incoming().updatedAt == request.time;
+      allow update: if isOwner(userId)
+                    && isValidId(userId)
+                    && isValidUser(incoming())
+                    && incoming().createdAt == existing().createdAt
+                    && incoming().updatedAt == request.time;
+      allow delete: if isAdmin();
+    }
+
+    // -- Cart Validation --
+    function isValidCartItem(data) {
+      let validKeys = data.keys().hasOnly(['productId', 'size', 'color', 'quantity', 'addedAt']);
+      let hasRequired = data.keys().hasAll(['productId', 'size', 'color', 'quantity', 'addedAt']);
+      let validProduct = data.productId is string && data.productId.size() <= 50;
+      let validQty = data.quantity is number && data.quantity >= 1 && data.quantity <= 99;
+      return validKeys && hasRequired && validProduct && validQty;
+    }
+
+    match /users/{userId}/cartItems/{cartItemId} {
+      allow read, list: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId)
+                    && isValidId(cartItemId)
+                    && isValidCartItem(incoming())
+                    && incoming().addedAt == request.time;
+      allow update: if isOwner(userId)
+                    && isValidId(cartItemId)
+                    && isValidCartItem(incoming())
+                    && incoming().addedAt == existing().addedAt;
+      allow delete: if isOwner(userId) || isAdmin();
+    }
+
+    // -- Order Validation --
+    function isValidOrder(data) {
+      let validKeys = data.keys().hasOnly(['date', 'total', 'status', 'items', 'shippingDetails', 'paymentDetails', 'createdAt']);
+      let hasRequired = data.keys().hasAll(['date', 'total', 'status', 'items', 'createdAt']);
+      return validKeys && hasRequired && data.total is number && data.items is list;
+    }
+
+    match /users/{userId}/orders/{orderId} {
+      allow read, list: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId)
+                    && isValidId(orderId)
+                    && isValidOrder(incoming())
+                    && incoming().createdAt == request.time;
+      allow update: if isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['status']);
+      allow delete: if isAdmin();
+    }
+
+    // Global order read for admin dashboard
+    match /{path=**}/orders/{orderId} {
+      allow read, list: if isAdmin();
+    }
+  }
+}

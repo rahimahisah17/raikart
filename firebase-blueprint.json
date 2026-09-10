@@ -1,0 +1,92 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile data including preferences.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "maxLength": 150 },
+        "wishlist": { "type": "array", "maxLength": 100 },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      },
+      "required": ["name", "email", "createdAt", "updatedAt"]
+    },
+    "Admin": {
+      "title": "Admin",
+      "description": "Admin privileges tracker.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "grantedAt": { "type": "timestamp" }
+      },
+      "required": ["email", "grantedAt"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "E-commerce product.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 100 },
+        "category": { "type": "string", "maxLength": 100 },
+        "price": { "type": "number" },
+        "description": { "type": "string" },
+        "image": { "type": "string" },
+        "colors": { "type": "array" },
+        "sizes": { "type": "array" },
+        "stock": { "type": "number" },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      },
+      "required": ["name", "category", "price", "description", "image", "colors", "sizes", "stock", "createdAt", "updatedAt"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Product category.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 100 },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      },
+      "required": ["name", "createdAt", "updatedAt"]
+    },
+    "CartItem": {
+      "title": "CartItem",
+      "description": "An item in the user's shopping cart.",
+      "type": "object",
+      "properties": {
+        "productId": { "type": "string", "maxLength": 50 },
+        "size": { "type": "string", "maxLength": 20 },
+        "color": { "type": "string", "maxLength": 50 },
+        "quantity": { "type": "number" },
+        "addedAt": { "type": "timestamp" }
+      },
+      "required": ["productId", "size", "color", "quantity", "addedAt"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "A completed order.",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string", "maxLength": 50 },
+        "total": { "type": "number" },
+        "status": { "type": "string", "maxLength": 50 },
+        "items": { "type": "array" },
+        "shippingDetails": { "type": "object" },
+        "paymentDetails": { "type": "object" },
+        "createdAt": { "type": "timestamp" }
+      },
+      "required": ["date", "total", "status", "items", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": { "schema": { "$ref": "User" }, "description": "User profile data." },
+    "/users/{userId}/cartItems/{cartItemId}": { "schema": { "$ref": "CartItem" }, "description": "Items in the user's cart." },
+    "/users/{userId}/orders/{orderId}": { "schema": { "$ref": "Order" }, "description": "Orders placed by the user." },
+    "/admins/{adminId}": { "schema": { "$ref": "Admin" }, "description": "Admin users." },
+    "/products/{productId}": { "schema": { "$ref": "Product" }, "description": "Product catalog." },
+    "/categories/{categoryId}": { "schema": { "$ref": "Category" }, "description": "Product categories." }
+  }
+}

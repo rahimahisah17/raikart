@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  # Placeholder for future stages
+  
+  # postgres:
+  #   image: postgres:15
+  #   environment:
+  #     POSTGRES_USER: raikart_user
+  #     POSTGRES_PASSWORD: raikart_password
+  #     POSTGRES_DB: raikart_db
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
+
+  # backend:
+  #   build:
+  #     context: ./backend
+  #   ports:
+  #     - "5000:5000"
+  #   environment:
+  #     - DATABASE_URL=postgresql://raikart_user:raikart_password@postgres:5432/raikart_db
+  #   depends_on:
+  #     - postgres
+
+  # frontend:
+  #   build:
+  #     context: ./frontend
+  #   ports:
+  #     - "3000:3000"
+  #   depends_on:
+  #     - backend
+
+volumes:
+  postgres_data:
