@@ -6,3 +6,10 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Secrets & credentials — never commit these
+firebase-service-account.json
+server/firebase-service-account.json
+server/media/firebase-service-account.json
+*.service-account.json
+firebase-applet-config.json

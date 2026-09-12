@@ -1,38 +1,43 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
-import firebaseConfig from '../firebase-applet-config.json';
 
-const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-export const auth = getAuth(app);
+const env = import.meta.env;
 
-export const OperationType = {
-  CREATE: 'create',
-  UPDATE: 'update',
-  DELETE: 'delete',
-  LIST: 'list',
-  GET: 'get',
-  WRITE: 'write',
+// Firebase config is read exclusively from VITE_-prefixed environment variables
+// (set in a local, gitignored .env). No credentials are hardcoded, and no
+// credential-bearing JSON is committed to the repo.
+const firebaseConfig = {
+  apiKey: env.VITE_FIREBASE_API_KEY,
+  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: env.VITE_FIREBASE_APP_ID,
+  ...(env.VITE_FIREBASE_MEASUREMENT_ID ? { measurementId: env.VITE_FIREBASE_MEASUREMENT_ID } : {}),
 };
 
-export function handleFirestoreError(error, operationType, path) {
-  const errInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData?.map(provider => ({
-        providerId: provider.providerId,
-        email: provider.email,
-      })) || []
-    },
-    operationType,
-    path
-  }
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+if (!env.VITE_FIREBASE_API_KEY || !env.VITE_FIREBASE_PROJECT_ID || !env.VITE_FIREBASE_APP_ID) {
+  throw new Error(
+    'Firebase is not configured. Copy .env.example to .env and fill in the VITE_FIREBASE_* values.'
+  );
 }
+
+const app = initializeApp(firebaseConfig);
+
+// Clear any stale "pending redirect" state left in sessionStorage by a previous
+// signInWithRedirect attempt. We now use Google Identity Services (GIS) + 
+// signInWithCredential, which needs no redirect handshake. Without this cleanup,
+// the auth SDK would try to complete the stale redirect on init and hang.
+try {
+  Object.keys(sessionStorage).forEach((key) => {
+    if (key.startsWith('firebase:pendingRedirect')) {
+      sessionStorage.removeItem(key);
+    }
+  });
+} catch (e) {
+  // Ignore — sessionStorage may be unavailable in some environments.
+}
+
+// Firebase is used for authentication only. Firestore was intentionally removed
+// (dummy catalog + localStorage are the source of truth until PostgreSQL).
+export const auth = getAuth(app);

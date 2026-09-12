@@ -89,16 +89,6 @@ export default function MainLayout() {
 
 
 
-              {isAdmin && (
-                <Link 
-                  to="/admin" 
-                  className="text-black hover:opacity-65 transition-opacity p-1.5 bg-[#fed7aa] border border-[#fdba74] rounded-full flex items-center justify-center shadow-sm"
-                  title="Admin Portal"
-                >
-                  <ShieldCheck className="w-5 h-5 text-amber-800" />
-                </Link>
-              )}
-
               <Link to={user ? "/profile" : "/login"} className="text-black hover:opacity-60 transition-opacity md:hidden">
                 <User className="w-6 h-6" strokeWidth={1.5} />
               </Link>
@@ -109,6 +99,14 @@ export default function MainLayout() {
                     {wishlist.length}
                   </span>
                 )}
+              </Link>
+              <Link 
+                to="/admin" 
+                className="text-black hover:opacity-65 transition-opacity p-1.5 bg-[#fed7aa] border border-[#fdba74] rounded-full flex items-center justify-center shadow-sm"
+                title="Admin Portal"
+                aria-label="Admin Portal"
+              >
+                <ShieldCheck className="w-5 h-5 text-amber-800" />
               </Link>
               <Link to="/cart" className="text-black hover:opacity-60 transition-opacity relative">
                 <ShoppingBag className="w-6 h-6" strokeWidth={1.5} />

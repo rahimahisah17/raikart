@@ -1,59 +1,113 @@
 import { useState, useEffect } from 'react';
-import { Navigate } from 'react-router-dom';
-import { LayoutDashboard, Package, Tags, Warehouse, ShoppingCart, Users, Check, X, ShieldCheck } from 'lucide-react';
+import { Navigate, Link } from 'react-router-dom';
+import { LayoutDashboard, Package, Tags, Warehouse, ShoppingCart, Users, X, ShieldCheck, CreditCard, Star, Settings, LogOut, Search, Eye, Trash2, Ban, UserCheck, RefreshCw } from 'lucide-react';
 import defaultProductImg from '../assets/images/raikart_air_max_1788860931144.jpg';
 import { useAppContext } from '../context/AppContext';
-import { db, OperationType, handleFirestoreError } from '../firebase';
-import { collection, collectionGroup, onSnapshot, doc, setDoc, updateDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { auth } from '../firebase';
 import CloudinaryUploader from '../components/CloudinaryUploader';
+import { destroyImage, extractPublicIdFromUrl } from '../services/cloudinaryService';
+import { listUsers, setUserStatus, deleteUser } from '../services/adminService';
+
+// Persist admin-only data to localStorage for now (Firestore removed;
+// PostgreSQL will become the persistent database later).
+function usePersistedState(key, initialValue) {
+  const [state, setState] = useState(() => {
+    try {
+      const saved = localStorage.getItem(key);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      // Ignore corrupt/stale data and fall back to the seed.
+    }
+    return initialValue;
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(key, JSON.stringify(state));
+    } catch (e) {
+      // Storage unavailable — keep working in memory.
+    }
+  }, [key, state]);
+
+  return [state, setState];
+}
 
 export default function AdminPortal() {
-  const { user, isAdmin, loading, products, categories } = useAppContext();
+  const { user, isAdmin, loading, products, setProducts, categories: seedCategories, logout } = useAppContext();
   const [activeTab, setActiveTab] = useState('dashboard');
 
-  const [allOrders, setAllOrders] = useState([]);
-  const [allUsers, setAllUsers] = useState([]);
-  const [admins, setAdmins] = useState([]);
+  // Products (and their stock) come from the shared AppContext catalog, so the
+  // storefront and the Admin Portal read/write the same inventory. Categories
+  // are admin-local, seeded from the mock catalog.
+  const [categories, setCategories] = usePersistedState('raikart_admin_categories', seedCategories);
 
-  // Fetch admin-only global data
-  useEffect(() => {
-    if (isAdmin) {
-      const unsubOrders = onSnapshot(collectionGroup(db, 'orders'), (snap) => {
-        const o = snap.docs.map(d => ({ 
-          id: d.id, 
-          userId: d.ref.parent.parent.id, // Extract userId from path
-          ...d.data() 
-        }));
-        o.sort((a, b) => b.createdAt?.toMillis() - a.createdAt?.toMillis());
-        setAllOrders(o);
-      }, (err) => handleFirestoreError(err, OperationType.LIST, 'orders (group)'));
+  // Orders are read from the same localStorage key the checkout flow writes to
+  // (`raikart_user_orders`), so the Dashboard, Orders and Payments views stay in
+  // sync with real customer orders. PostgreSQL will replace this later.
+  const [allOrders, setAllOrders] = usePersistedState('raikart_user_orders', []);
 
-      const unsubUsers = onSnapshot(collection(db, 'users'), (snap) => {
-        setAllUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      }, (err) => handleFirestoreError(err, OperationType.LIST, 'users'));
+  // Users are REAL Firebase Authentication users, fetched via the Admin SDK.
+  const [users, setUsers] = useState([]);
+  const [usersLoading, setUsersLoading] = useState(true);
+  const [usersError, setUsersError] = useState('');
 
-      const unsubAdmins = onSnapshot(collection(db, 'admins'), (snap) => {
-        setAdmins(snap.docs.map(d => d.id));
-      }, (err) => handleFirestoreError(err, OperationType.LIST, 'admins'));
-
-      return () => {
-        unsubOrders();
-        unsubUsers();
-        unsubAdmins();
-      };
+  const refreshUsers = async () => {
+    setUsersLoading(true);
+    setUsersError('');
+    try {
+      const data = await listUsers();
+      setUsers(data.users || []);
+    } catch (e) {
+      setUsersError(e.message || 'Failed to load users');
+    } finally {
+      setUsersLoading(false);
     }
+  };
+
+  useEffect(() => {
+    if (isAdmin) refreshUsers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin]);
 
   if (loading) return <div className="text-center py-20">Loading...</div>;
-  if (!user || !isAdmin) return <Navigate to="/" replace />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (!isAdmin) {
+    return (
+      <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-24 text-center">
+        <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-red-50 border border-red-200 mb-4">
+          <ShieldCheck className="w-7 h-7 text-red-500" />
+        </div>
+        <h1 className="text-2xl font-black uppercase tracking-tighter mb-2">Unauthorized</h1>
+        <p className="text-slate-600 mb-1">
+          You are signed in as <span className="font-bold text-black">{user?.email}</span>.
+        </p>
+        <p className="text-slate-500 text-sm mb-8">
+          This account is not authorized to access the Admin Portal.
+        </p>
+        <Link
+          to="/"
+          className="inline-block bg-black text-white px-6 py-2.5 rounded-full text-sm font-bold hover:opacity-90 transition-opacity"
+        >
+          Back to Home
+        </Link>
+      </div>
+    );
+  }
+
+  const handleLogout = () => {
+    logout();
+  };
 
   const tabs = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'products', label: 'Manage Products', icon: Package },
-    { id: 'categories', label: 'Manage Categories', icon: Tags },
-    { id: 'inventory', label: 'Manage Inventory', icon: Warehouse },
-    { id: 'orders', label: 'Manage Orders', icon: ShoppingCart },
-    { id: 'users', label: 'Manage Users', icon: Users },
+    { id: 'users', label: 'Users', icon: Users },
+    { id: 'products', label: 'Products', icon: Package },
+    { id: 'categories', label: 'Categories', icon: Tags },
+    { id: 'orders', label: 'Orders', icon: ShoppingCart },
+    { id: 'payments', label: 'Payments', icon: CreditCard },
+    { id: 'reviews', label: 'Reviews', icon: Star },
+    { id: 'inventory', label: 'Inventory', icon: Warehouse },
+    { id: 'settings', label: 'Settings', icon: Settings },
   ];
 
   return (
@@ -88,17 +142,27 @@ export default function AdminPortal() {
               </button>
             );
           })}
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-lg text-red-600 hover:bg-red-50 transition-colors mt-2 border-t border-gray-100 pt-4"
+          >
+            <LogOut className="w-5 h-5" />
+            Logout
+          </button>
         </nav>
       </div>
 
       {/* Content Area */}
       <div className="flex-1 bg-white border border-gray-200 rounded-lg shadow-sm p-6 overflow-hidden">
-        {activeTab === 'dashboard' && <DashboardView orders={allOrders} users={allUsers} products={products} />}
-        {activeTab === 'products' && <ProductsView products={products} categories={categories} />}
-        {activeTab === 'categories' && <CategoriesView categories={categories} />}
-        {activeTab === 'inventory' && <InventoryView products={products} />}
-        {activeTab === 'orders' && <OrdersView orders={allOrders} />}
-        {activeTab === 'users' && <UsersView users={allUsers} admins={admins} />}
+        {activeTab === 'dashboard' && <DashboardView orders={allOrders} users={users} products={products} />}
+        {activeTab === 'users' && <UsersView users={users} loading={usersLoading} error={usersError} onRefresh={refreshUsers} />}
+        {activeTab === 'products' && <ProductsView products={products} setProducts={setProducts} categories={categories} />}
+        {activeTab === 'categories' && <CategoriesView categories={categories} setCategories={setCategories} />}
+        {activeTab === 'orders' && <OrdersView orders={allOrders} setOrders={setAllOrders} />}
+        {activeTab === 'payments' && <PaymentsView orders={allOrders} />}
+        {activeTab === 'reviews' && <ReviewsView products={products} />}
+        {activeTab === 'inventory' && <InventoryView products={products} setProducts={setProducts} />}
+        {activeTab === 'settings' && <SettingsView />}
       </div>
     </div>
   );
@@ -106,34 +170,38 @@ export default function AdminPortal() {
 
 function DashboardView({ orders, users, products }) {
   const totalRevenue = orders.reduce((sum, o) => sum + (o.total || 0), 0);
-  const lowStock = products.filter(p => p.stock < 10);
+
+  const cards = [
+    { label: 'Total Users', value: users.length, icon: Users },
+    { label: 'Total Products', value: products.length, icon: Package },
+    { label: 'Total Orders', value: orders.length, icon: ShoppingCart },
+    { label: 'Revenue', value: `$${totalRevenue.toFixed(2)}`, icon: LayoutDashboard },
+  ];
 
   return (
     <div>
       <h2 className="text-xl font-bold mb-6">Dashboard Summary</h2>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
-          <p className="text-sm text-slate-500 font-medium">Total Revenue</p>
-          <p className="text-2xl font-bold">${totalRevenue.toFixed(2)}</p>
-        </div>
-        <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
-          <p className="text-sm text-slate-500 font-medium">Total Orders</p>
-          <p className="text-2xl font-bold">{orders.length}</p>
-        </div>
-        <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
-          <p className="text-sm text-slate-500 font-medium">Total Users</p>
-          <p className="text-2xl font-bold">{users.length}</p>
-        </div>
-        <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
-          <p className="text-sm text-slate-500 font-medium">Low Stock Items</p>
-          <p className="text-2xl font-bold text-red-600">{lowStock.length}</p>
-        </div>
+        {cards.map((c) => {
+          const Icon = c.icon;
+          return (
+            <div key={c.label} className="bg-slate-50 p-4 rounded-lg border border-slate-100 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-black text-white flex items-center justify-center shrink-0">
+                <Icon className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-sm text-slate-500 font-medium">{c.label}</p>
+                <p className="text-2xl font-bold">{c.value}</p>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-function ProductsView({ products, categories }) {
+function ProductsView({ products, setProducts, categories }) {
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState({ 
     name: '', 
@@ -150,8 +218,8 @@ function ProductsView({ products, categories }) {
     setEditingId(p.id);
     setForm({ 
       ...p, 
-      price: p.price.toString(), 
-      stock: p.stock.toString(),
+      price: (typeof p.price === 'number' ? p.price : parseFloat(p.price) || 0).toString(), 
+      stock: (p.stock ?? 0).toString(),
       colorsInput: Array.isArray(p.colors) ? p.colors.join(', ') : (p.colors || 'Black, White'),
       sizesInput: Array.isArray(p.sizes) ? p.sizes.join(', ') : (p.sizes || 'S, M, L')
     });
@@ -171,9 +239,10 @@ function ProductsView({ products, categories }) {
     });
   };
 
-  const handleSave = async (e) => {
+  const handleSave = (e) => {
     e.preventDefault();
-    const id = editingId === 'new' || !editingId ? `prod-${Date.now()}` : editingId;
+    const isNew = editingId === 'new' || !editingId;
+    const id = isNew ? `prod-${Date.now()}` : editingId;
     
     const parsedColors = form.colorsInput.split(',').map(c => c.trim()).filter(Boolean);
     const parsedSizes = form.sizesInput.split(',').map(s => s.trim()).filter(Boolean);
@@ -181,31 +250,40 @@ function ProductsView({ products, categories }) {
     const productData = {
       name: form.name,
       category: form.category || categories[0]?.name || 'Uncategorized',
+      gender: form.gender || 'unisex',
       price: parseFloat(form.price) || 0,
       description: form.description || 'Premium Raikart clothing apparel.',
       image: form.image || defaultProductImg,
       colors: parsedColors.length > 0 ? parsedColors : ['Black', 'White'],
       sizes: parsedSizes.length > 0 ? parsedSizes : ['S', 'M', 'L'],
       stock: parseInt(form.stock) || 0,
-      updatedAt: serverTimestamp()
+      updatedAt: new Date().toISOString()
     };
 
-    if (!editingId) productData.createdAt = serverTimestamp();
-
-    try {
-      await setDoc(doc(db, 'products', id), productData, { merge: true });
-      resetForm();
-    } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `products/${id}`);
-    }
+    setProducts((prev) => {
+      const exists = prev.some((p) => p.id === id);
+      if (exists) {
+        return prev.map((p) => (p.id === id ? { ...p, ...productData } : p));
+      }
+      return [...prev, { id, ...productData, createdAt: new Date().toISOString() }];
+    });
+    resetForm();
   };
 
-  const handleDelete = async (id) => {
+  const handleDelete = (p) => {
     if (confirm('Delete this product?')) {
-      try {
-        await deleteDoc(doc(db, 'products', id));
-      } catch (err) {
-        handleFirestoreError(err, OperationType.DELETE, `products/${id}`);
+      setProducts((prev) => prev.filter((item) => item.id !== p.id));
+      // Best-effort: delete the associated Cloudinary asset (admin-created products).
+      const publicId = extractPublicIdFromUrl(p.image);
+      if (publicId) {
+        (async () => {
+          try {
+            const token = auth.currentUser ? await auth.currentUser.getIdToken() : null;
+            await destroyImage(publicId, token);
+          } catch (err) {
+            console.warn('Cloudinary cleanup skipped:', err.message || err);
+          }
+        })();
       }
     }
   };
@@ -260,10 +338,10 @@ function ProductsView({ products, categories }) {
                 <tr key={p.id} className="hover:bg-slate-50">
                   <td className="p-3"><img src={p.image} className="w-12 h-12 object-cover rounded" alt="" /></td>
                   <td className="p-3 font-medium">{p.name}</td>
-                  <td className="p-3">${p.price.toFixed(2)}</td>
+                  <td className="p-3">${Number(p.price || 0).toFixed(2)}</td>
                   <td className="p-3">
                     <button onClick={() => handleEdit(p)} className="text-blue-600 hover:underline mr-3">Edit</button>
-                    <button onClick={() => handleDelete(p.id)} className="text-red-600 hover:underline">Delete</button>
+                    <button onClick={() => handleDelete(p)} className="text-red-600 hover:underline">Delete</button>
                   </td>
                 </tr>
               ))}
@@ -275,29 +353,20 @@ function ProductsView({ products, categories }) {
   );
 }
 
-function CategoriesView({ categories }) {
+function CategoriesView({ categories, setCategories }) {
   const [name, setName] = useState('');
 
-  const handleAdd = async (e) => {
+  const handleAdd = (e) => {
     e.preventDefault();
     if (!name.trim()) return;
     const id = `cat-${Date.now()}`;
-    try {
-      await setDoc(doc(db, 'categories', id), {
-        name,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      });
-      setName('');
-    } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, `categories/${id}`);
-    }
+    setCategories((prev) => [...prev, { id, name: name.trim() }]);
+    setName('');
   };
 
-  const handleDelete = async (id) => {
-    if(confirm('Delete this category?')) {
-      try { await deleteDoc(doc(db, 'categories', id)); }
-      catch (err) { handleFirestoreError(err, OperationType.DELETE, `categories/${id}`); }
+  const handleDelete = (id) => {
+    if (confirm('Delete this category?')) {
+      setCategories((prev) => prev.filter((c) => c.id !== id));
     }
   }
 
@@ -322,13 +391,9 @@ function CategoriesView({ categories }) {
   );
 }
 
-function InventoryView({ products }) {
-  const handleStockUpdate = async (id, newStock) => {
-    try {
-      await updateDoc(doc(db, 'products', id), { stock: parseInt(newStock) || 0, updatedAt: serverTimestamp() });
-    } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `products/${id}`);
-    }
+function InventoryView({ products, setProducts }) {
+  const handleStockUpdate = (id, newStock) => {
+    setProducts((prev) => prev.map((p) => (p.id === id ? { ...p, stock: parseInt(newStock) || 0 } : p)));
   };
 
   return (
@@ -351,11 +416,11 @@ function InventoryView({ products }) {
                 <td className="p-3">
                   <input 
                     type="number" 
-                    defaultValue={p.stock} 
+                    defaultValue={p.stock ?? 0} 
                     onBlur={(e) => {
                       if (e.target.value != p.stock) handleStockUpdate(p.id, e.target.value);
                     }}
-                    className={`border p-1 w-24 rounded ${p.stock < 10 ? 'border-red-500 text-red-700 bg-red-50' : ''}`}
+                    className={`border p-1 w-24 rounded ${(p.stock ?? 0) < 10 ? 'border-red-500 text-red-700 bg-red-50' : ''}`}
                   />
                 </td>
               </tr>
@@ -367,13 +432,9 @@ function InventoryView({ products }) {
   );
 }
 
-function OrdersView({ orders }) {
-  const updateStatus = async (userId, orderId, status) => {
-    try {
-      await updateDoc(doc(db, `users/${userId}/orders`, orderId), { status });
-    } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `users/${userId}/orders/${orderId}`);
-    }
+function OrdersView({ orders, setOrders }) {
+  const updateStatus = (orderId, status) => {
+    setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, status } : o)));
   };
 
   return (
@@ -394,11 +455,11 @@ function OrdersView({ orders }) {
               <tr key={o.id} className="hover:bg-slate-50">
                 <td className="p-3 text-xs text-gray-500 font-mono">{o.id}</td>
                 <td className="p-3">{new Date(o.date).toLocaleDateString()}</td>
-                <td className="p-3 font-medium">${o.total.toFixed(2)}</td>
+                <td className="p-3 font-medium">${Number(o.total || 0).toFixed(2)}</td>
                 <td className="p-3">
                   <select 
                     value={o.status} 
-                    onChange={(e) => updateStatus(o.userId, o.id, e.target.value)}
+                    onChange={(e) => updateStatus(o.id, e.target.value)}
                     className="border p-1 rounded text-sm bg-white"
                   >
                     <option value="Processing">Processing</option>
@@ -416,55 +477,352 @@ function OrdersView({ orders }) {
   );
 }
 
-function UsersView({ users, admins }) {
-  const toggleAdmin = async (userId, isCurrentlyAdmin, email) => {
+const PROVIDER_LABELS = {
+  password: 'Email / Password',
+  'google.com': 'Google',
+  'facebook.com': 'Facebook',
+  'github.com': 'GitHub',
+  'twitter.com': 'Twitter',
+  'apple.com': 'Apple',
+  phone: 'Phone',
+};
+
+function providerLabel(p) {
+  return PROVIDER_LABELS[p] || p;
+}
+
+function fmtDate(iso) {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '-';
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+function UserAvatar({ name, email, photoURL }) {
+  const initial = (name || email || '?').charAt(0).toUpperCase();
+  if (photoURL) {
+    return <img src={photoURL} alt="" className="w-9 h-9 rounded-full object-cover border border-gray-200" />;
+  }
+  return (
+    <div className="w-9 h-9 rounded-full bg-black text-white flex items-center justify-center text-sm font-bold">
+      {initial}
+    </div>
+  );
+}
+
+function UsersView({ users, loading, error, onRefresh }) {
+  const [search, setSearch] = useState('');
+  const [selectedUid, setSelectedUid] = useState(null);
+  const [busyUid, setBusyUid] = useState(null);
+
+  const q = search.trim().toLowerCase();
+  const filtered = q
+    ? users.filter((u) =>
+        (u.name || '').toLowerCase().includes(q) ||
+        (u.email || '').toLowerCase().includes(q) ||
+        (u.uid || '').toLowerCase().includes(q)
+      )
+    : users;
+
+  const selected = selectedUid ? users.find((u) => u.uid === selectedUid) : null;
+
+  const handleToggleStatus = async (u) => {
+    const action = u.disabled ? 'enable' : 'disable';
+    if (!confirm(`${u.disabled ? 'Enable' : 'Disable'} ${u.email || u.name}?`)) return;
+    setBusyUid(u.uid);
     try {
-      if (isCurrentlyAdmin) {
-        await deleteDoc(doc(db, 'admins', userId));
-      } else {
-        await setDoc(doc(db, 'admins', userId), { email, grantedAt: serverTimestamp() });
-      }
+      await setUserStatus(u.uid, !u.disabled);
+      await onRefresh();
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `admins/${userId}`);
+      alert(err.message || `Failed to ${action} user`);
+    } finally {
+      setBusyUid(null);
+    }
+  };
+
+  const handleDelete = async (u) => {
+    if (!confirm(`Permanently delete ${u.email || u.name}? This cannot be undone.`)) return;
+    setBusyUid(u.uid);
+    try {
+      await deleteUser(u.uid);
+      if (selectedUid === u.uid) setSelectedUid(null);
+      await onRefresh();
+    } catch (err) {
+      alert(err.message || 'Failed to delete user');
+    } finally {
+      setBusyUid(null);
     }
   };
 
   return (
     <div>
-      <h2 className="text-xl font-bold mb-6">Manage Users</h2>
-      <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="border-b-2 border-gray-200 bg-gray-50">
-              <th className="p-3 text-sm font-semibold text-gray-700">Name</th>
-              <th className="p-3 text-sm font-semibold text-gray-700">Email</th>
-              <th className="p-3 text-sm font-semibold text-gray-700">Joined</th>
-              <th className="p-3 text-sm font-semibold text-gray-700">Admin Role</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {users.map(u => {
-              const isAdmin = admins.includes(u.id) || u.email === 'rahimahisah17@gmail.com';
-              return (
-                <tr key={u.id} className="hover:bg-slate-50">
-                  <td className="p-3 font-medium">{u.name}</td>
-                  <td className="p-3 text-gray-600">{u.email}</td>
-                  <td className="p-3 text-sm text-gray-500">{u.createdAt?.toDate().toLocaleDateString() || '-'}</td>
-                  <td className="p-3">
-                    <label className="flex items-center cursor-pointer">
-                      <div className="relative">
-                        <input type="checkbox" className="sr-only" checked={isAdmin} onChange={() => toggleAdmin(u.id, isAdmin, u.email)} disabled={u.email === 'rahimahisah17@gmail.com'} />
-                        <div className={`block w-10 h-6 rounded-full ${isAdmin ? 'bg-black' : 'bg-gray-300'}`}></div>
-                        <div className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition transform ${isAdmin ? 'translate-x-4' : ''}`}></div>
-                      </div>
-                      {u.email === 'rahimahisah17@gmail.com' && <span className="ml-2 text-xs text-slate-400">(Super)</span>}
-                    </label>
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-xl font-bold">Manage Users</h2>
+        <button
+          onClick={onRefresh}
+          disabled={loading}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+        >
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          Refresh
+        </button>
+      </div>
+
+      <div className="relative mb-4">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by name, email, or UID…"
+          className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-black/10"
+        />
+      </div>
+
+      {error && (
+        <div className="mb-4 p-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="text-center py-16 text-sm text-slate-500">Loading users…</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="border-b-2 border-gray-200 bg-gray-50">
+                <th className="p-3 text-sm font-semibold text-gray-700">User</th>
+                <th className="p-3 text-sm font-semibold text-gray-700">UID</th>
+                <th className="p-3 text-sm font-semibold text-gray-700">Provider</th>
+                <th className="p-3 text-sm font-semibold text-gray-700">Verified</th>
+                <th className="p-3 text-sm font-semibold text-gray-700">Status</th>
+                <th className="p-3 text-sm font-semibold text-gray-700">Joined</th>
+                <th className="p-3 text-sm font-semibold text-gray-700">Last Sign-in</th>
+                <th className="p-3 text-sm font-semibold text-gray-700">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="p-6 text-center text-sm text-slate-500">
+                    {q ? 'No users match your search.' : 'No users yet.'}
                   </td>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
+              ) : (
+                filtered.map((u) => (
+                  <tr key={u.uid} className="hover:bg-slate-50">
+                    <td className="p-3">
+                      <div className="flex items-center gap-3">
+                        <UserAvatar name={u.name} email={u.email} photoURL={u.photoURL} />
+                        <div className="min-w-0">
+                          <p className="font-medium truncate">{u.name || '—'}</p>
+                          <p className="text-sm text-gray-500 truncate">{u.email || '—'}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="p-3 text-xs text-gray-500 font-mono max-w-[140px] truncate" title={u.uid}>
+                      {u.uid}
+                    </td>
+                    <td className="p-3 text-sm text-gray-600">{providerLabel(u.provider)}</td>
+                    <td className="p-3">
+                      {u.emailVerified ? (
+                        <span className="text-xs font-bold px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">Verified</span>
+                      ) : (
+                        <span className="text-xs font-bold px-2 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200">Unverified</span>
+                      )}
+                    </td>
+                    <td className="p-3">
+                      {u.disabled ? (
+                        <span className="text-xs font-bold px-2 py-1 rounded-full bg-red-50 text-red-700 border border-red-200">Disabled</span>
+                      ) : (
+                        <span className="text-xs font-bold px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">Enabled</span>
+                      )}
+                    </td>
+                    <td className="p-3 text-sm text-gray-500">{fmtDate(u.createdAt)}</td>
+                    <td className="p-3 text-sm text-gray-500">{fmtDate(u.lastSignInAt)}</td>
+                    <td className="p-3 whitespace-nowrap">
+                      <button
+                        onClick={() => setSelectedUid(u.uid)}
+                        className="text-blue-600 hover:underline mr-2 inline-flex items-center gap-1"
+                        title="View details"
+                      >
+                        <Eye className="w-4 h-4" /> View
+                      </button>
+                      <button
+                        onClick={() => handleToggleStatus(u)}
+                        disabled={busyUid === u.uid}
+                        className="text-gray-600 hover:underline mr-2 inline-flex items-center gap-1 disabled:opacity-50"
+                        title={u.disabled ? 'Enable user' : 'Disable user'}
+                      >
+                        {u.disabled ? <UserCheck className="w-4 h-4" /> : <Ban className="w-4 h-4" />}
+                        {u.disabled ? 'Enable' : 'Disable'}
+                      </button>
+                      <button
+                        onClick={() => handleDelete(u)}
+                        disabled={busyUid === u.uid}
+                        className="text-red-600 hover:underline inline-flex items-center gap-1 disabled:opacity-50"
+                        title="Delete user"
+                      >
+                        <Trash2 className="w-4 h-4" /> Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {selected && (
+        <UserDetailsModal user={selected} onClose={() => setSelectedUid(null)} />
+      )}
+    </div>
+  );
+}
+
+function UserDetailsModal({ user, onClose }) {
+  const rows = [
+    { label: 'Name', value: user.name || '—' },
+    { label: 'Email', value: user.email || '—' },
+    { label: 'Firebase UID', value: user.uid || '—' },
+    { label: 'Authentication Provider', value: providerLabel(user.provider) },
+    { label: 'Email Verification', value: user.emailVerified ? 'Verified' : 'Unverified' },
+    { label: 'Account Status', value: user.disabled ? 'Disabled' : 'Enabled' },
+    { label: 'Registration Date', value: fmtDate(user.createdAt) },
+    { label: 'Last Sign-in', value: fmtDate(user.lastSignInAt) },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose}></div>
+      <div className="relative bg-white rounded-lg shadow-xl w-full max-w-md p-6">
+        <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-700">
+          <X className="w-5 h-5" />
+        </button>
+        <div className="flex items-center gap-4 mb-6">
+          <UserAvatar name={user.name} email={user.email} photoURL={user.photoURL} />
+          <div>
+            <h3 className="text-lg font-bold">{user.name || 'Unnamed user'}</h3>
+            <p className="text-sm text-gray-500">{user.email || '—'}</p>
+          </div>
+        </div>
+        <dl className="space-y-3">
+          {rows.map((r) => (
+            <div key={r.label} className="flex justify-between gap-4 text-sm">
+              <dt className="text-gray-500 font-medium shrink-0">{r.label}</dt>
+              <dd className="text-gray-800 text-right break-all">{r.value}</dd>
+            </div>
+          ))}
+        </dl>
+        {user.photoURL && (
+          <img src={user.photoURL} alt="Profile" className="mt-4 w-full max-h-40 object-cover rounded-md border border-gray-100" />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PaymentsView({ orders }) {
+  return (
+    <div>
+      <h2 className="text-xl font-bold mb-6">Payments</h2>
+      {orders.length === 0 ? (
+        <p className="text-sm text-slate-500">No payments recorded yet.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="border-b-2 border-gray-200 bg-gray-50">
+                <th className="p-3 text-sm font-semibold text-gray-700">Payment Reference</th>
+                <th className="p-3 text-sm font-semibold text-gray-700">Customer</th>
+                <th className="p-3 text-sm font-semibold text-gray-700">Method</th>
+                <th className="p-3 text-sm font-semibold text-gray-700">Amount</th>
+                <th className="p-3 text-sm font-semibold text-gray-700">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {orders.map(o => (
+                <tr key={o.id} className="hover:bg-slate-50">
+                  <td className="p-3 text-xs text-gray-500 font-mono">{o.paymentDetails?.reference || o.id}</td>
+                  <td className="p-3 font-medium">
+                    {o.shippingDetails?.name || o.shippingDetails?.email || '-'}
+                    {o.shippingDetails?.email && o.shippingDetails?.name ? (
+                      <span className="block text-xs text-gray-400">{o.shippingDetails.email}</span>
+                    ) : null}
+                  </td>
+                  <td className="p-3 text-gray-600">
+                    {o.paymentDetails?.method || 'Paystack'}
+                    {o.paymentDetails?.channel ? ` • ${o.paymentDetails.channel}` : ''}
+                  </td>
+                  <td className="p-3 font-medium">${Number(o.total || 0).toFixed(2)}</td>
+                  <td className="p-3">
+                    <span className="text-xs font-bold px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      {(o.paymentDetails?.status === 'paid' || o.status !== 'Cancelled') ? 'Paid' : 'Unpaid'}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const MOCK_REVIEWS = [
+  { id: 'rev-1', product: 'Raikart Pro Dri-FIT Training Top', author: 'Amina B.', rating: 5, comment: 'Amazing quality, fits perfectly. Fast delivery too!', date: '2026-09-01' },
+  { id: 'rev-2', product: 'Raikart Pastel Pink Active Tee', author: 'John K.', rating: 4, comment: 'Great material, colors are vibrant.', date: '2026-09-03' },
+  { id: 'rev-3', product: 'Raikart Rose Gold Sheen Workout Tank', author: 'Sara L.', rating: 5, comment: 'Love it! Very comfortable for workouts.', date: '2026-09-05' },
+];
+
+function ReviewsView() {
+  return (
+    <div>
+      <h2 className="text-xl font-bold mb-6">Product Reviews</h2>
+      <div className="space-y-4">
+        {MOCK_REVIEWS.map(r => (
+          <div key={r.id} className="border border-slate-200 rounded-lg p-4 bg-slate-50">
+            <div className="flex items-center justify-between">
+              <p className="font-bold">{r.product}</p>
+              <div className="flex items-center gap-0.5">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <Star key={i} className={`w-4 h-4 ${i < r.rating ? 'fill-amber-400 text-amber-400' : 'text-gray-300'}`} />
+                ))}
+              </div>
+            </div>
+            <p className="text-sm text-gray-600 mt-2">"{r.comment}"</p>
+            <p className="text-xs text-slate-400 mt-2">{r.author} • {r.date}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SettingsView() {
+  return (
+    <div>
+      <h2 className="text-xl font-bold mb-6">Settings</h2>
+      <div className="space-y-6 max-w-xl">
+        <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+          <label className="block text-sm font-semibold text-gray-700 mb-1">Store Name</label>
+          <input type="text" defaultValue="Raikart" className="border p-2 rounded w-full" />
+        </div>
+        <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+          <label className="block text-sm font-semibold text-gray-700 mb-1">Support Email</label>
+          <input type="email" defaultValue="support@raikart.com" className="border p-2 rounded w-full" />
+        </div>
+        <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+          <label className="block text-sm font-semibold text-gray-700 mb-1">Currency</label>
+          <select className="border p-2 rounded w-full">
+            <option value="USD">USD ($)</option>
+            <option value="NGN">NGN (₦)</option>
+            <option value="EUR">EUR (€)</option>
+          </select>
+        </div>
+        <button className="bg-black text-white px-4 py-2 rounded text-sm font-medium">Save Settings</button>
       </div>
     </div>
   );

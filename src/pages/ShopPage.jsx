@@ -53,7 +53,7 @@ export default function ShopPage() {
     }
 
     if (normalizedQuery === 'shoes' || normalizedQuery === 'footwear' || normalizedQuery === 'sneakers') {
-      return cat.includes('shoe') || cat.includes('runner') || name.includes('shoe') || name.includes('runner') || name.includes('sneaker');
+      return cat.includes('shoe') || cat.includes('sneaker') || name.includes('shoe') || name.includes('sneaker');
     }
 
     const words = normalizedQuery.split(/\s+/).filter(w => w.length > 0);

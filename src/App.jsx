@@ -11,6 +11,7 @@ import RegisterPage from './pages/RegisterPage.jsx';
 import ProfilePage from './pages/ProfilePage.jsx';
 import AdminPortal from './pages/AdminPortal.jsx';
 import PaymentPage from './pages/PaymentPage.jsx';
+import PaymentCallbackPage from './pages/PaymentCallbackPage.jsx';
 import HelpPage from './pages/HelpPage.jsx';
 import ContactPage from './pages/ContactPage.jsx';
 
@@ -25,6 +26,7 @@ export default function App() {
         <Route path="cart" element={<CartPage />} />
         <Route path="checkout" element={<CheckoutPage />} />
         <Route path="payment" element={<PaymentPage />} />
+        <Route path="payment/callback" element={<PaymentCallbackPage />} />
         <Route path="wishlist" element={<WishlistPage />} />
         <Route path="login" element={<LoginPage />} />
         <Route path="register" element={<RegisterPage />} />

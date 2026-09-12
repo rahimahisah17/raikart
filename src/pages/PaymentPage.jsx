@@ -1,48 +1,33 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAppContext } from '../context/AppContext';
-import { CreditCard, ShieldCheck, Building, Smartphone, CheckCircle, Lock, ArrowLeft, Key } from 'lucide-react';
+import { CreditCard, ShieldCheck, Building, Smartphone, CheckCircle, Lock, ArrowLeft } from 'lucide-react';
 
 export default function PaymentPage() {
-  const { cart, getCartTotal, checkout, products } = useAppContext();
+  const { cart, getCartTotal, products } = useAppContext();
   const navigate = useNavigate();
   const location = useLocation();
 
   // Retrieve pending checkout details from location state or localStorage fallback
   const pendingDetails = location.state || JSON.parse(localStorage.getItem('raikart_pending_checkout') || '{}');
 
-  const [paystackKey, setPaystackKey] = useState(() => {
-    return localStorage.getItem('raikart_paystack_key') || 
-           import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || 
-           'pk_test_884f3922e910248a9b2c7520194856a982937';
-  });
-
   const [paymentMethod, setPaymentMethod] = useState('paystack_card'); // 'paystack_card', 'paystack_bank', 'paystack_ussd'
   const [processing, setProcessing] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(null);
-  const [showKeyConfig, setShowKeyConfig] = useState(false);
 
+  // Load Paystack Inline JS script dynamically
   useEffect(() => {
     if (pendingDetails && pendingDetails.email) {
       localStorage.setItem('raikart_pending_checkout', JSON.stringify(pendingDetails));
     }
   }, [pendingDetails]);
 
-  useEffect(() => {
-    localStorage.setItem('raikart_paystack_key', paystackKey);
-  }, [paystackKey]);
-
-  // Load Paystack Inline JS script dynamically
-  useEffect(() => {
-    if (!window.PaystackPop) {
-      const script = document.createElement('script');
-      script.src = 'https://js.paystack.co/v1/inline.js';
-      script.async = true;
-      document.body.appendChild(script);
-    }
-  }, []);
-
   const totalAmount = getCartTotal();
+
+  // Prices are NOT converted to Naira. The dollar figure is passed through
+  // 1:1 (no exchange-rate multiplication) — Paystack bills in kobo, so a
+  // $45 item is charged as 4500 kobo.
+  const usdToKobo = (usd) => Math.round((Number(usd) || 0) * 100);
 
   if (cart.length === 0 && !paymentSuccess) {
     return (
@@ -63,72 +48,49 @@ export default function PaymentPage() {
     const email = pendingDetails.email || 'customer@example.com';
     const name = pendingDetails.name || `${pendingDetails.firstName || 'Customer'} ${pendingDetails.lastName || ''}`.trim();
     const address = pendingDetails.address || 'Plot 30, Lagos, Nigeria';
-    const amountInKobo = Math.round(totalAmount * 100 * 1500); // Equivalence or direct amount
+    const amountInKobo = usdToKobo(totalAmount);
 
     const reference = `pst_tx_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+    const callbackUrl = `${window.location.origin}/payment/callback`;
 
-    // Try Paystack Pop inline script if loaded
-    if (window.PaystackPop) {
-      try {
-        const handler = window.PaystackPop.setup({
-          key: paystackKey,
-          email: email,
+    // Persist the reference + amount so the callback page can verify and
+    // finalize the order after Paystack redirects back.
+    localStorage.setItem(
+      'raikart_pending_payment',
+      JSON.stringify({ reference, amountInKobo })
+    );
+
+    try {
+      // Start the transaction server-side (uses the SECRET key) and redirect
+      // the browser to Paystack's hosted checkout page. This avoids the inline
+      // iframe entirely, which is far more reliable across browsers.
+      const res = await fetch('/api/paystack/initialize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
           amount: amountInKobo,
-          currency: 'NGN',
-          ref: reference,
+          reference,
+          callbackUrl,
           metadata: {
             custom_fields: [
-              { display_name: "Customer Name", variable_name: "customer_name", value: name },
-              { display_name: "Shipping Address", variable_name: "shipping_address", value: address }
+              { display_name: 'Customer Name', variable_name: 'customer_name', value: name },
+              { display_name: 'Shipping Address', variable_name: 'shipping_address', value: address }
             ]
-          },
-          callback: async function (response) {
-            await finalizeOrder(response.reference || reference, 'Paystack Gateway');
-          },
-          onClose: function () {
-            setProcessing(false);
           }
-        });
-        
-        handler.openIframe();
-        return;
-      } catch (err) {
-        console.warn("Paystack Inline Popup fallback activated:", err);
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success || !data.authorizationUrl) {
+        throw new Error(data.error || 'Could not start payment');
       }
+
+      window.location.href = data.authorizationUrl;
+    } catch (err) {
+      setProcessing(false);
+      localStorage.removeItem('raikart_pending_payment');
+      alert(err.message || 'Could not start payment');
     }
-
-    // Direct simulated Paystack authorization fallback (always works seamlessly)
-    setTimeout(async () => {
-      await finalizeOrder(reference, 'Paystack Secured Payment');
-    }, 1500);
-  };
-
-  const finalizeOrder = async (txRef, gatewayName) => {
-    const shippingInfo = {
-      email: pendingDetails.email || 'customer@example.com',
-      name: pendingDetails.name || `${pendingDetails.firstName || 'Customer'} ${pendingDetails.lastName || ''}`.trim(),
-      address: `${pendingDetails.address || 'Plot 30'}, ${pendingDetails.city || 'Lagos'}, ${pendingDetails.country || 'Nigeria'} ${pendingDetails.zip || '102101'}`
-    };
-
-    const paymentInfo = {
-      method: gatewayName,
-      reference: txRef,
-      paystackKey: paystackKey,
-      paidAt: new Date().toISOString()
-    };
-
-    const orderId = await checkout(shippingInfo, paymentInfo);
-    localStorage.removeItem('raikart_pending_checkout');
-
-    setProcessing(false);
-    setPaymentSuccess({
-      orderId,
-      reference: txRef,
-      amount: totalAmount,
-      email: shippingInfo.email,
-      name: shippingInfo.name,
-      address: shippingInfo.address
-    });
   };
 
   return (
@@ -211,41 +173,6 @@ export default function PaymentPage() {
               <p className="text-slate-600 text-sm font-medium mt-1">
                 Select your preferred Paystack payment option to complete your purchase.
               </p>
-            </div>
-
-            {/* Paystack Key Config Bar */}
-            <div className="bg-[#fff2e6] border border-[#fdba74] rounded-2xl p-4 text-xs space-y-3">
-              <div className="flex justify-between items-center">
-                <span className="font-extrabold uppercase tracking-wider text-slate-900 flex items-center gap-1.5">
-                  <Key className="w-4 h-4 text-slate-700" />
-                  Paystack Key Configuration
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setShowKeyConfig(!showKeyConfig)}
-                  className="font-bold text-slate-600 hover:text-black underline"
-                >
-                  {showKeyConfig ? 'Hide' : 'Configure Key'}
-                </button>
-              </div>
-
-              {showKeyConfig && (
-                <div className="space-y-2 pt-2 border-t border-[#fdba74]/50 animate-in fade-in duration-150">
-                  <label className="block text-[11px] font-bold text-slate-700">
-                    Paystack Test Public / Secret Key
-                  </label>
-                  <input
-                    type="text"
-                    value={paystackKey}
-                    onChange={(e) => setPaystackKey(e.target.value.trim())}
-                    placeholder="e.g. pk_test_... or sk_test_..."
-                    className="w-full bg-white border border-[#fdba74] rounded-xl p-2.5 font-mono text-xs text-black focus:ring-2 focus:ring-black outline-none"
-                  />
-                  <p className="text-[10px] text-slate-500 italic">
-                    You can input your Paystack Test Key above. It is stored securely in your local session.
-                  </p>
-                </div>
-              )}
             </div>
 
             {/* Payment Method Selector */}
