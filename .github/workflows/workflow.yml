@@ -1,0 +1,41 @@
+name: Build, Push, Deploy to Azure Container Apps
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-push-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to Azure via OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install Container Apps extension
+        run: az extension add --name containerapp --upgrade
+
+      - name: Log in to ACR
+        run: az acr login --name raikartacr8642
+
+      - name: Build and push image
+        run: |
+          docker build -t raikartacr8642.azurecr.io/raikart:${{ github.sha }} .
+          docker push raikartacr8642.azurecr.io/raikart:${{ github.sha }}
+
+      - name: Deploy to Azure Container Apps
+        run: |
+          az containerapp update \
+            --name raikart-app \
+            --resource-group aca-rg \
+            --image raikartacr8642.azurecr.io/raikart:${{ github.sha }}
