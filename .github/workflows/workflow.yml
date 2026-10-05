@@ -30,7 +30,17 @@ jobs:
 
       - name: Build and push image
         run: |
-          docker build -t raikartacr8642.azurecr.io/raikart:${{ github.sha }} .
+          docker build \
+            --build-arg VITE_ADMIN_EMAILS="${{ secrets.VITE_ADMIN_EMAILS }}" \
+            --build-arg VITE_FIREBASE_API_KEY="${{ secrets.VITE_FIREBASE_API_KEY }}" \
+            --build-arg VITE_FIREBASE_AUTH_DOMAIN="${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}" \
+            --build-arg VITE_FIREBASE_PROJECT_ID="${{ secrets.VITE_FIREBASE_PROJECT_ID }}" \
+            --build-arg VITE_FIREBASE_STORAGE_BUCKET="${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}" \
+            --build-arg VITE_FIREBASE_MESSAGING_SENDER_ID="${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}" \
+            --build-arg VITE_FIREBASE_APP_ID="${{ secrets.VITE_FIREBASE_APP_ID }}" \
+            --build-arg VITE_GOOGLE_CLIENT_ID="${{ secrets.VITE_GOOGLE_CLIENT_ID }}" \
+            --build-arg VITE_PAYSTACK_PUBLIC_KEY="${{ secrets.VITE_PAYSTACK_PUBLIC_KEY }}" \
+            -t raikartacr8642.azurecr.io/raikart:${{ github.sha }} .
           docker push raikartacr8642.azurecr.io/raikart:${{ github.sha }}
 
       - name: Deploy to Azure Container Apps
