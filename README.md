@@ -1,4 +1,4 @@
-# Raikart — Containerization & Azure Deployment
+# Raikart - Containerization & Azure Deployment
 
 [![Docker](https://img.shields.io/badge/Docker-Containerized-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
 [![Azure](https://img.shields.io/badge/Azure-Container%20Apps-0078D4?logo=microsoftazure&logoColor=white)](https://azure.microsoft.com/)
